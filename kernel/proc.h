@@ -105,3 +105,12 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 };
+
+
+struct channel {
+  int data;             // The data stored in the channel
+  int available;        // return whether data available or not
+  enum procstate state;           
+  struct proc *proc; 
+  struct spinlock lock; 
+};

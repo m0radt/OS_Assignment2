@@ -10,6 +10,8 @@ struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
 
+struct channel channels[NCHANNEL];
+
 struct proc *initproc;
 
 int nextpid = 1;
@@ -359,6 +361,16 @@ exit(int status)
       p->ofile[fd] = 0;
     }
   }
+  // Close all channels the prcocess have creates.
+  for (int i = 0; i < NCHANNEL; i++) {
+    acquire(&channels[i].lock);
+    if (channels[i].proc == p) {
+      channels[i].state = UNUSED;
+      channels[i].proc = 0;
+      wakeup(&channels[i]);
+    }
+    release(&channels[i].lock);
+  }
 
   begin_op();
   iput(p->cwd);
@@ -590,6 +602,15 @@ kill(int pid)
   for(p = proc; p < &proc[NPROC]; p++){
     acquire(&p->lock);
     if(p->pid == pid){
+      for (int i = 0; i < NCHANNEL; i++) {
+        acquire(&channels[i].lock);
+        if (channels[i].proc == p) {
+          channels[i].state = UNUSED;
+          channels[i].proc = 0;
+          wakeup(&channels[i]);
+        }
+        release(&channels[i].lock);
+      }
       p->killed = 1;
       if(p->state == SLEEPING){
         // Wake process from sleep().
@@ -680,4 +701,83 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+void init_channels(void){
+  for (int i = 0; i < NCHANNEL; i++) {
+    channels[i].state = UNUSED;
+    initlock(&channels[i].lock, "channel");
+    channels[i].data = 0;
+    channels[i].proc = 0;
+    channels[i].available = 0;
+  }
+}
+int channel_create(void){
+  for (int i = 0; i < NCHANNEL; i++) {
+    acquire(&channels[i].lock);
+    if (channels[i].state == UNUSED) {
+      channels[i].state = USED;
+      channels[i].data = 0;
+      channels[i].proc = myproc();
+      channels[i].available = 0;
+      release(&channels[i].lock);
+      return i;
+    }
+    release(&channels[i].lock);
+  }
+  return -1;
+
+}
+int channel_put(int cd, int data){
+  if (cd < 0 || cd >= NCHANNEL)
+    return -1;
+
+  acquire(&channels[cd].lock);
+  while (channels[cd].state == USED && channels[cd].available ) {//available == 1
+    sleep(&channels[cd], &channels[cd].lock);
+  }
+  if (channels[cd].state == UNUSED ) {
+    release(&channels[cd].lock);
+    return -1;
+  }
+  channels[cd].data = data;
+  channels[cd].available = 1;
+  wakeup(&channels[cd]);
+  release(&channels[cd].lock);
+  return 0;
+
+}
+int channel_take(int cd, uint64 dataAddr){
+  if (cd < 0 || cd >= NCHANNEL)
+    return -1;
+
+  acquire(&channels[cd].lock);
+  while (channels[cd].state == USED  && !channels[cd].available) {
+    sleep(&channels[cd], &channels[cd].lock);
+  }
+  if (channels[cd].state == UNUSED) {
+    release(&channels[cd].lock);
+    return -1;
+  }
+  int data = channels[cd].data;
+  channels[cd].data = 0;
+  channels[cd].available = 0;
+  if (copyout(myproc()->pagetable, dataAddr, (char*)&data, sizeof(data)) < 0) {
+    release(&channels[cd].lock);
+    return -1;
+  }
+  wakeup(&channels[cd]);
+  release(&channels[cd].lock);
+  return 0;
+}
+int channel_destroy(int cd){
+  if (cd < 0 || cd >= NCHANNEL)
+    return -1;
+
+  acquire(&channels[cd].lock);
+  channels[cd].state = UNUSED;
+  channels[cd].proc = 0;
+  wakeup(&channels[cd]);
+  release(&channels[cd].lock);
+  return 0;
+
 }

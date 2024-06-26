@@ -4,6 +4,7 @@ struct file;
 struct inode;
 struct pipe;
 struct proc;
+struct channel;
 struct spinlock;
 struct sleeplock;
 struct stat;
@@ -96,6 +97,7 @@ struct cpu*     mycpu(void);
 struct cpu*     getmycpu(void);
 struct proc*    myproc();
 void            procinit(void);
+void            init_channels(void);
 void            scheduler(void) __attribute__((noreturn));
 void            sched(void);
 void            sleep(void*, struct spinlock*);
@@ -106,7 +108,10 @@ void            yield(void);
 int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
-
+int             channel_create(void);
+int             channel_put(int cd, int data);
+int             channel_take(int cd, uint64 dataAddr);
+int             channel_destroy(int cd);
 // swtch.S
 void            swtch(struct context*, struct context*);
 
